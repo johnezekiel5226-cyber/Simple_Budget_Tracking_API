@@ -8,7 +8,13 @@ from .serializers import TransactionSerializer, UserSerializer
 from .permissions import IsOwnerOrReadOnly
 from rest_framework.authtoken.models import Token
 from rest_framework.views import APIView
+import csv
+from django.http import HttpResponse
+from rest_framework.permissions import IsAuthenticated
 from rest_framework import status
+from reportlab.lib.pagesizes import A4
+from reportlab.pdfgen import canvas
+
 
 User = get_user_model()
 
@@ -22,6 +28,69 @@ class TransactionViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(owner=self.request.user)
+
+class ExportCSVView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        transactions = Transaction.objects.filter(user=request.user)
+
+        response = HttpResponse(content_type='text/csv')
+        response['Content-Disposition'] = 'attachment; filename="transactions.csv"'
+
+        writer = csv.writer(response)
+        writer.writerow([
+            'Transaction Type',
+            'Category',
+            'Amount',
+            'Date',
+            'Description'
+        ])
+
+        for t in transactions:
+            writer.writerow([
+                t.get_transaction_type_display(),
+                t.category,
+                t.amount,
+                t.date,
+                t.description
+            ])
+
+        return response
+
+class ExportPDFView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        response = HttpResponse(content_type='application/pdf')
+        response['Content-Disposition'] = 'attachment; filename="transactions.pdf"'
+
+        p = canvas.Canvas(response, pagesize=A4)
+        width, height = A4
+
+        y = height - 40
+        p.setFont("Helvetica", 10)
+
+        p.drawString(40, y, "Budget Transactions Report")
+        y -= 30
+
+        transactions = Transaction.objects.filter(user=request.user)
+
+        for t in transactions:
+            line = f"{t.date} | {t.get_transaction_type_display()} | {t.category} | {t.amount}"
+            p.drawString(40, y, line)
+            y -= 20
+
+            if y < 40:
+                p.showPage()
+                p.setFont("Helvetica", 10)
+                y = height - 40
+
+        p.showPage()
+        p.save()
+
+        return response
+
 
 class UserViewSet(viewsets.ModelViewSet):
     """
